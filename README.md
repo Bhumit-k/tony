@@ -188,6 +188,40 @@ Want it to reload automatically while you edit the code?
 uvicorn server:app --reload --port 8420
 ```
 
+The dashboard itself lives in `web/`, a React 19 + TypeScript + Tailwind v4
+app (built with Vite). The `frontend/` directory checked in at the repo root
+is its **compiled output** — `uvicorn` just serves those static files — so
+you don't need Node installed to run Tony day-to-day, only to change the UI.
+
+**Developing the UI** — run the backend and a hot-reloading dev server side
+by side:
+
+```bash
+# terminal 1
+uvicorn server:app --reload --port 8420
+
+# terminal 2
+cd web
+npm install   # first time only
+npm run dev
+```
+
+Open the URL Vite prints (typically **http://localhost:5173**); it proxies
+`/tony`, `/run`, `/skills`, `/companions`, `/knowledge`, `/device`,
+`/integrations`, `/health`, and `/whatsapp` to the FastAPI server on 8420, so
+API calls behave exactly like production while you get instant reload.
+
+**Shipping a UI change** — build it back into `frontend/` and let uvicorn
+serve the result:
+
+```bash
+cd web
+npm run build
+```
+
+Then just run `uvicorn server:app --port 8420` as usual — no separate step
+needed, no Node required on the machine that runs it.
+
 Prefer to hit the API directly instead of the UI?
 
 ```bash
@@ -302,8 +336,12 @@ tony_ai/
 │   ├── base_agent.py         Shared BaseAgent + TeamResult + skill/confirmation resolution
 │   ├── definitions.py         One class per team (Sherlock, Forge, Pulse, ...)
 │   └── __init__.py
-├── frontend/
-│   └── index.html             The single dashboard (3D World View, chat, voice, skills, knowledge graph)
+├── frontend/                  Compiled dashboard (built output of web/ — do not hand-edit)
+├── web/                        Dashboard source: React 19 + TypeScript + Tailwind v4 (Vite)
+│   ├── src/components/          Panels (chat, dock, settings, ...) + the Three.js world view
+│   ├── src/hooks/                Voice I/O, gesture control, theme, health polling, ...
+│   ├── src/lib/                   API client, agent metadata, shared types
+│   └── vite.config.ts            Builds to ../frontend, dev-proxies API calls to :8420
 ├── whatsapp-bridge/
 │   ├── index.js                WhatsApp <-> Tony AI bridge (whatsapp-web.js, QR login)
 │   ├── package.json
@@ -359,8 +397,9 @@ depending on model load — that's expected for deep dive, not a bug.
 
 - **Add a team:** subclass `BaseAgent` in `teams/definitions.py` with a
   `team_name`, `codename`, and `system_prompt`, then wire it into
-  `orchestrator.py` — and add a matching entry to the `AGENT_META` object
-  in `frontend/index.html` if you want it to show up in the agent room too.
+  `orchestrator.py` — and add a matching entry to `AGENT_META` in
+  `web/src/lib/agents.ts` (then `npm run build` in `web/`) if you want it to
+  show up in the agent room too.
 - **Change the topology:** the three parallel tracks and the convergence
   chain are plain Python in `TonyAI.run()` — reorder or branch however you
   like.
