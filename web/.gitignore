@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.local
+.DS_Store
+
+# Vite/TS incremental build info
+node_modules/.tmp/
+*.tsbuildinfo
+
+npm-debug.log*
