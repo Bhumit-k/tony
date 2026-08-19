@@ -1,0 +1,15 @@
+{
+  "name": "tony-ai-whatsapp-bridge",
+  "version": "1.0.0",
+  "description": "Connects Tony AI's local orchestrator to WhatsApp via whatsapp-web.js (QR-code login, no business API needed).",
+  "main": "index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "whatsapp-web.js": "^1.26.0",
+    "qrcode-terminal": "^0.12.0",
+    "node-fetch": "^2.7.0"
+  }
+}

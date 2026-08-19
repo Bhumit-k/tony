@@ -1,0 +1,1821 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Tony — AI Assistant</title>
+<style>
+  /* ============================================================
+     DESIGN TOKENS — light default, blue accent; dark mode variant.
+     Apple system font stack (no custom face — the skill's own advice).
+  ============================================================ */
+  :root, [data-theme="light"]{
+    --bg:#F5F5F7; --bg-elevated:#FFFFFF;
+    --surface:rgba(255,255,255,0.72); --surface-solid:#FFFFFF;
+    --text:#1D1D1F; --text-secondary:#6E6E73; --text-tertiary:#AEAEB2;
+    --border:rgba(0,0,0,0.08); --border-strong:rgba(0,0,0,0.13);
+    --accent:#007AFF; --accent-soft:rgba(0,122,255,0.12); --accent-strong:#0060DB;
+    --shadow-sm:0 1px 2px rgba(0,0,0,0.05);
+    --shadow-md:0 8px 24px rgba(0,0,0,0.08);
+    --shadow-lg:0 20px 60px rgba(0,0,0,0.14);
+    --danger:#FF3B30; --warn:#FF9500; --success:#34C759;
+    --top-edge:rgba(255,255,255,0.6);
+  }
+  [data-theme="dark"]{
+    --bg:#0A0A0C; --bg-elevated:#1C1C1E;
+    --surface:rgba(28,28,30,0.72); --surface-solid:#1C1C1E;
+    --text:#F5F5F7; --text-secondary:#98989D; --text-tertiary:#636366;
+    --border:rgba(255,255,255,0.09); --border-strong:rgba(255,255,255,0.16);
+    --accent:#0A84FF; --accent-soft:rgba(10,132,255,0.18); --accent-strong:#409CFF;
+    --shadow-sm:0 1px 2px rgba(0,0,0,0.4);
+    --shadow-md:0 8px 24px rgba(0,0,0,0.5);
+    --shadow-lg:0 20px 60px rgba(0,0,0,0.6);
+    --danger:#FF453A; --warn:#FF9F0A; --success:#30D158;
+    --top-edge:rgba(255,255,255,0.08);
+  }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html{ color-scheme:light dark; }
+  html,body{ height:100%; overflow:hidden; }
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font:100%/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    transition:background-color 420ms ease, color 420ms ease;
+    overscroll-behavior:none;
+  }
+  ::selection{ background:var(--accent); color:#fff; }
+  h1,h2,h3{ margin:0; }
+  button{ font-family:inherit; }
+
+  /* ---- 3D World View ---- */
+  #worldCanvas{ position:fixed; inset:0; z-index:0; display:block; touch-action:none; }
+  body.no-webgl #worldCanvas{ display:none; }
+  #worldHint{
+    position:fixed; bottom:82px; left:50%; transform:translateX(-50%); z-index:5;
+    font-size:11px; color:var(--text-tertiary); background:var(--surface); backdrop-filter:blur(10px);
+    padding:5px 12px; border-radius:12px; border:1px solid var(--border); pointer-events:none;
+    opacity:0; transition:opacity 400ms ease 1.5s;
+  }
+  #worldHint.show{ opacity:1; }
+  body.no-webgl #worldHint{ display:none; }
+
+  #labelLayer{ position:fixed; inset:0; z-index:3; pointer-events:none; }
+  body.no-webgl #labelLayer{ display:none; }
+  .world-label{
+    position:absolute; top:0; left:0; will-change:transform, opacity;
+    display:flex; align-items:center; gap:5px; padding:3px 9px 3px 7px; border-radius:11px;
+    background:var(--surface); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);
+    border:1px solid var(--border); font-size:11px; font-weight:600; color:var(--text);
+    white-space:nowrap; transform:translate(-50%, -50%);
+  }
+  .world-label .dot{ width:6px; height:6px; border-radius:50%; flex:0 0 auto; }
+  .world-label.tony{ font-size:12px; font-weight:700; padding:4px 11px 4px 8px; }
+
+  /* Press feedback lives on the press, per the skill — not on release */
+  .pressable{ transition:transform 120ms ease-out, background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease; }
+  .pressable:active{ transform:scale(0.97); }
+
+  @media (prefers-reduced-motion: reduce){
+    *{ animation-duration:0.001ms !important; animation-iteration-count:1 !important; transition-duration:0.001ms !important; }
+  }
+
+  /* ============================================================
+     HEADER — translucent material, per the materials & depth section
+  ============================================================ */
+  header{
+    position:fixed; top:0; left:0; right:0; z-index:20; display:flex; align-items:center; justify-content:space-between;
+    padding:14px 20px; background:var(--surface); backdrop-filter:blur(20px) saturate(180%);
+    -webkit-backdrop-filter:blur(20px) saturate(180%);
+    border-bottom:1px solid var(--border); border-top:1px solid var(--top-edge);
+  }
+  .brand{ display:flex; align-items:center; gap:12px; min-width:0; }
+  .brand-orb{ width:32px; height:32px; border-radius:50%; flex:0 0 auto; position:relative;
+    background:radial-gradient(circle at 32% 28%, #fff, var(--accent) 60%, var(--accent-strong) 100%);
+    box-shadow:0 0 0 1px var(--border), var(--shadow-sm);
+  }
+  .brand-text{ min-width:0; }
+  .brand-name{
+    font-size:16px; font-weight:700; letter-spacing:-0.01em; line-height:1.2;
+    outline:none; border-radius:6px; padding:1px 4px; margin:0 -4px; cursor:text;
+    max-width:44vw; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .brand-name:hover{ background:var(--accent-soft); }
+  .brand-name:focus{ background:var(--accent-soft); box-shadow:0 0 0 2px var(--accent-soft); }
+  .brand-sub{ font-size:11.5px; color:var(--text-secondary); letter-spacing:0.02em; }
+  .header-right{ display:flex; align-items:center; gap:8px; }
+
+  .theme-toggle{
+    width:52px; height:30px; border-radius:16px; border:1px solid var(--border); background:var(--bg-elevated);
+    position:relative; cursor:pointer; flex:0 0 auto;
+  }
+  .theme-toggle .knob{
+    position:absolute; top:2px; left:2px; width:24px; height:24px; border-radius:50%;
+    background:var(--accent); display:flex; align-items:center; justify-content:center; font-size:12px;
+    transition:transform 320ms cubic-bezier(.2,.8,.2,1); box-shadow:var(--shadow-sm);
+  }
+  [data-theme="dark"] .theme-toggle .knob{ transform:translateX(22px); }
+
+  .icon-btn{
+    width:34px; height:34px; border-radius:10px; border:1px solid var(--border); background:var(--bg-elevated);
+    color:var(--text-secondary); display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:15px;
+  }
+  .icon-btn:hover{ border-color:var(--accent); color:var(--accent); }
+  .status-dot{ width:7px; height:7px; border-radius:50%; background:var(--text-tertiary); }
+  .status-dot.on{ background:var(--success); box-shadow:0 0 6px var(--success); }
+
+  /* ============================================================
+     MAIN COLUMN
+  ============================================================ */
+  main{
+    position:fixed; top:70px; right:16px; bottom:96px; z-index:10;
+    width:min(400px, calc(100vw - 32px)); max-width:calc(100vw - 32px);
+    display:flex; flex-direction:column; overflow-y:auto;
+    background:var(--surface); backdrop-filter:blur(24px) saturate(180%); -webkit-backdrop-filter:blur(24px) saturate(180%);
+    border:1px solid var(--border); border-top-color:var(--top-edge); border-radius:20px;
+    box-shadow:var(--shadow-lg); padding:20px 16px;
+  }
+  #resizeHandle{
+    position:fixed; top:70px; z-index:11; width:10px; bottom:96px;
+    right:min(400px, calc(100vw - 32px)); cursor:ew-resize; touch-action:none;
+  }
+  #resizeHandle::after{ content:''; position:absolute; top:50%; right:3px; width:3px; height:36px; margin-top:-18px; border-radius:2px; background:var(--border-strong); }
+  @media (max-width:760px){ #resizeHandle{ display:none; } }
+
+  /* Pop-out mode: a second window showing only the chat, in sync via BroadcastChannel */
+  body.popout-mode #worldCanvas, body.popout-mode #worldHint, body.popout-mode header .brand-orb,
+  body.popout-mode #resizeHandle, body.popout-mode #dock, body.popout-mode #popoutBtn{ display:none; }
+  body.popout-mode main{ position:static; width:100%; max-width:100%; height:100vh; margin-top:0; border-radius:0; border:none; box-shadow:none; }
+  body.popout-mode header{ position:static; }
+
+  /* No-WebGL fallback: show the flat CSS orb where the 3D world would be */
+  body.no-webgl main{ position:static; margin:70px auto 0; width:100%; max-width:640px; height:auto; border-radius:0; border:none; box-shadow:none; background:transparent; backdrop-filter:none; }
+  body.no-webgl #resizeHandle{ display:none; }
+
+  /* ---- Orb (2D fallback only — the 3D world shows Tony when WebGL is available) ---- */
+  .orb-section{ display:none; flex-direction:column; align-items:center; gap:14px; padding:20px 0 30px; }
+  body.no-webgl .orb-section{ display:flex; }
+  .orb-wrap{ position:relative; width:132px; height:132px; }
+  .orb{
+    width:100%; height:100%; border-radius:50%; position:relative;
+    background:radial-gradient(circle at 32% 26%, #ffffff 0%, var(--accent) 55%, var(--accent-strong) 100%);
+    box-shadow:0 0 0 1px var(--border), var(--shadow-md);
+    transform:scale(1); transition:box-shadow 300ms ease;
+    animation:breathe 4.2s cubic-bezier(.45,0,.55,1) infinite;
+  }
+  .orb::after{
+    content:''; position:absolute; inset:-14px; border-radius:50%; border:1.5px solid var(--accent);
+    opacity:0; transition:opacity 240ms ease;
+  }
+  @keyframes breathe{ 0%,100%{ transform:scale(1); } 50%{ transform:scale(1.045); } }
+  .orb-wrap[data-state="listening"] .orb{ animation:none; }
+  .orb-wrap[data-state="listening"] .orb::after{ opacity:0.55; animation:ringPulse 1.8s ease-out infinite; }
+  .orb-wrap[data-state="thinking"] .orb{ animation:breathe 1.1s cubic-bezier(.45,0,.55,1) infinite; }
+  .orb-wrap[data-state="speaking"] .orb{ animation:breathe 0.55s cubic-bezier(.45,0,.55,1) infinite; }
+  .orb-wrap[data-state="error"] .orb{ background:radial-gradient(circle at 32% 26%, #fff 0%, var(--danger) 75%, var(--danger) 100%); opacity:0.85; }
+  @keyframes ringPulse{ 0%{ transform:scale(0.9); opacity:0.55; } 100%{ transform:scale(1.35); opacity:0; } }
+  .orb{ --amp:0; }
+  .orb-wrap[data-state="listening"] .orb, .orb-wrap[data-state="speaking"] .orb{ transform:scale(calc(1 + var(--amp) * 0.12)); }
+
+  .state-label{ font-size:13px; color:var(--text-secondary); letter-spacing:0.01em; height:18px; }
+
+  /* ---- Empty-state suggestion chips ---- */
+  .suggestions{ display:flex; flex-wrap:wrap; gap:8px; justify-content:center; margin:6px 0 4px; }
+  .suggestions.hidden{ display:none; }
+  .chip{
+    font-size:13px; padding:9px 14px; border-radius:16px; border:1px solid var(--border); background:var(--bg-elevated);
+    color:var(--text-secondary); cursor:pointer;
+  }
+  .chip:hover{ border-color:var(--accent); color:var(--accent); }
+
+  /* ---- Transcript ---- */
+  .transcript{ display:flex; flex-direction:column; gap:10px; margin-bottom:16px; }
+  .bubble-row{ display:flex; animation:rise 260ms cubic-bezier(.2,.8,.2,1); }
+  @keyframes rise{ from{ opacity:0; transform:translateY(6px);} to{ opacity:1; transform:translateY(0);} }
+  .bubble-row.you{ justify-content:flex-end; }
+  .bubble-row.tony{ justify-content:flex-start; }
+  .bubble{
+    max-width:78%; padding:10px 14px; border-radius:18px; font-size:15px; line-height:1.45;
+    box-shadow:var(--shadow-sm); white-space:pre-wrap; word-wrap:break-word;
+  }
+  .bubble-row.you .bubble{ background:var(--accent); color:#fff; border-bottom-right-radius:6px; }
+  .bubble-row.tony .bubble{ background:var(--bg-elevated); border:1px solid var(--border); border-bottom-left-radius:6px; }
+
+  /* ---- Agent Room card (inline, expandable) ---- */
+  .agent-room{
+    border:1px solid var(--border); border-radius:18px; background:var(--surface);
+    backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px);
+    box-shadow:var(--shadow-md); overflow:hidden; margin:4px 0 10px;
+    animation:materialize 340ms cubic-bezier(.2,.8,.2,1);
+  }
+  @keyframes materialize{ from{ opacity:0; transform:scale(0.98); filter:blur(4px); } to{ opacity:1; transform:scale(1); filter:blur(0); } }
+  .agent-room-head{
+    display:flex; align-items:center; justify-content:space-between; padding:12px 14px;
+    border-bottom:1px solid var(--border); cursor:pointer;
+  }
+  .agent-room-head .title{ font-size:13px; font-weight:700; display:flex; align-items:center; gap:8px; }
+  .agent-room-head .title .spinner{
+    width:13px; height:13px; border-radius:50%; border:2px solid var(--accent-soft); border-top-color:var(--accent);
+    animation:spin 0.8s linear infinite;
+  }
+  .agent-room-head.done .title .spinner{ display:none; }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+  .agent-room-head .chevron{ color:var(--text-tertiary); transition:transform 240ms cubic-bezier(.2,.8,.2,1); font-size:12px; }
+  .agent-room.collapsed .agent-room-head .chevron{ transform:rotate(-90deg); }
+  .agent-room-body{ padding:10px 14px 14px; display:flex; flex-direction:column; gap:10px;
+    max-height:1200px; transition:max-height 320ms cubic-bezier(.2,.8,.2,1), padding 320ms ease; }
+  .agent-room.collapsed .agent-room-body{ max-height:0; padding-top:0; padding-bottom:0; overflow:hidden; }
+
+  .agent-row{ display:flex; gap:10px; align-items:flex-start; }
+  .agent-avatar{
+    width:28px; height:28px; border-radius:50%; flex:0 0 auto; display:flex; align-items:center; justify-content:center;
+    font-size:12px; font-weight:700; color:#fff; margin-top:2px;
+  }
+  .agent-msg{ flex:1; min-width:0; }
+  .agent-msg .who{ font-size:12.5px; font-weight:700; }
+  .agent-msg .role{ font-size:11px; color:var(--text-tertiary); font-weight:500; margin-left:4px; }
+  .agent-msg .excerpt{
+    font-size:13.5px; color:var(--text-secondary); margin-top:2px; line-height:1.45; cursor:pointer;
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
+  }
+  .agent-msg .excerpt.expanded{ -webkit-line-clamp:unset; white-space:pre-wrap; }
+  .agent-row.ceo{ margin-top:2px; padding-top:10px; border-top:1px solid var(--border); }
+  .agent-row.ceo .agent-avatar{ width:32px; height:32px; font-size:13px; }
+  .agent-row.ceo .who{ font-size:13.5px; }
+  .agent-row.ceo .excerpt{ color:var(--text); font-size:14px; -webkit-line-clamp:unset; white-space:pre-wrap; }
+  .verdict-chip{
+    display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:600; padding:3px 9px;
+    border-radius:20px; margin-top:4px; background:rgba(255,59,48,0.1); color:var(--danger);
+  }
+
+  /* ---- Composer ---- */
+  .composer{
+    display:flex; gap:8px; padding:6px 6px 6px 16px; border-radius:24px; background:var(--bg-elevated);
+    border:1px solid var(--border); box-shadow:var(--shadow-sm);
+  }
+  .composer input{
+    flex:1; border:none; outline:none; background:transparent; color:var(--text); font-size:15px;
+    font-family:inherit; padding:8px 0;
+  }
+  .composer input::placeholder{ color:var(--text-tertiary); }
+  .composer button{
+    width:36px; height:36px; border-radius:50%; border:none; background:var(--accent); color:#fff;
+    display:flex; align-items:center; justify-content:center; cursor:pointer; flex:0 0 auto; font-size:16px;
+  }
+  .composer button:disabled{ opacity:0.35; }
+
+  .fullteam-hint{
+    text-align:center; font-size:11.5px; color:var(--text-tertiary); margin-top:10px; letter-spacing:0.01em;
+  }
+  .fullteam-hint b{ color:var(--text-secondary); }
+
+  /* ============================================================
+     DOCK — translucent floating pill, per materials & depth
+  ============================================================ */
+  #dock{
+    position:fixed; left:50%; bottom:18px; transform:translateX(-50%); z-index:30;
+    display:flex; align-items:center; gap:10px; padding:9px 12px; border-radius:30px;
+    background:var(--surface); backdrop-filter:blur(20px) saturate(180%); -webkit-backdrop-filter:blur(20px) saturate(180%);
+    border:1px solid var(--border); border-top-color:var(--top-edge); box-shadow:var(--shadow-lg);
+  }
+  #dock button{
+    width:42px; height:42px; border-radius:50%; border:1px solid var(--border); background:var(--bg-elevated);
+    color:var(--text-secondary); display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:18px;
+  }
+  #dock button:hover{ border-color:var(--accent); color:var(--accent); }
+  #dock button.mic.on{ background:var(--accent); border-color:var(--accent); color:#fff; box-shadow:0 0 0 6px var(--accent-soft); }
+  #dock button.toggled{ background:var(--accent-soft); border-color:var(--accent); color:var(--accent); }
+  #dock .dock-status{ font-size:11px; color:var(--text-tertiary); min-width:64px; max-width:120px; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+  #camPreview{
+    position:fixed; bottom:80px; left:16px; width:96px; height:72px; border-radius:12px; object-fit:cover;
+    transform:scaleX(-1); z-index:15; border:1px solid var(--border); opacity:0; pointer-events:none;
+    transition:opacity 300ms ease, box-shadow 250ms ease; background:#000; box-shadow:var(--shadow-md);
+  }
+  #camPreview.on{ opacity:1; }
+  #camPreview.wave-detected{ box-shadow:0 0 0 3px var(--accent); }
+
+  /* ============================================================
+     SETTINGS SHEET — anchored to trigger, dims background (per §12)
+  ============================================================ */
+  .sheet-backdrop{
+    position:fixed; inset:0; background:rgba(0,0,0,0.28); z-index:80; opacity:0; pointer-events:none;
+    transition:opacity 280ms ease;
+  }
+  .sheet-backdrop.open{ opacity:1; pointer-events:auto; }
+  .sheet{
+    position:fixed; left:0; right:0; bottom:0; z-index:81; max-width:480px; margin:0 auto;
+    background:var(--bg-elevated); border-radius:20px 20px 0 0; border:1px solid var(--border); border-bottom:none;
+    box-shadow:var(--shadow-lg); padding:10px 20px 26px;
+    transform:translateY(100%); transition:transform 360ms cubic-bezier(.2,.8,.2,1);
+    max-height:82vh; overflow-y:auto;
+  }
+  .sheet.open{ transform:translateY(0); }
+  .sheet-handle{ width:36px; height:4px; border-radius:2px; background:var(--border-strong); margin:8px auto 14px; }
+  .sheet h3{ font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-tertiary); margin:18px 0 10px; }
+  .sheet h3:first-of-type{ margin-top:4px; }
+  .field-row{ display:flex; align-items:center; justify-content:space-between; padding:11px 0; border-bottom:1px solid var(--border); gap:12px; }
+  .field-row:last-child{ border-bottom:none; }
+  .field-row label{ font-size:14.5px; }
+  .field-row .desc{ font-size:11.5px; color:var(--text-tertiary); margin-top:2px; }
+  .field-row input[type="text"]{
+    flex:1; text-align:right; border:none; outline:none; background:transparent; color:var(--text); font-size:14.5px; font-family:inherit;
+  }
+  .switch{ width:46px; height:27px; border-radius:16px; background:var(--border); border:none; position:relative; cursor:pointer; flex:0 0 auto; }
+  .switch::after{ content:''; position:absolute; top:2px; left:2px; width:23px; height:23px; border-radius:50%; background:#fff; box-shadow:var(--shadow-sm); transition:transform 260ms cubic-bezier(.2,.8,.2,1); }
+  .switch.on{ background:var(--success); }
+  .switch.on::after{ transform:translateX(19px); }
+  select.field-select{
+    border:none; outline:none; background:transparent; color:var(--text); font-size:14px; font-family:inherit; text-align:right;
+  }
+  .sheet-foot{ font-size:11px; color:var(--text-tertiary); line-height:1.6; padding-top:10px; }
+
+  /* ---- Skills grid ---- */
+  .skills-grid{ display:flex; flex-wrap:wrap; gap:8px; padding:8px 0 4px; }
+  .skill-chip{
+    display:flex; align-items:center; gap:6px; font-size:12.5px; padding:7px 11px 7px 9px;
+    border-radius:14px; border:1px solid var(--border); background:var(--bg-elevated); cursor:pointer; color:var(--text-secondary);
+  }
+  .skill-chip .dot{ width:7px; height:7px; border-radius:50%; background:var(--border-strong); flex:0 0 auto; }
+  .skill-chip.on{ border-color:var(--accent); color:var(--text); background:var(--accent-soft); }
+  .skill-chip.on .dot{ background:var(--accent); }
+  .skill-chip .confirm-mark{ font-size:9px; color:var(--warn); }
+
+  /* ---- Knowledge base (network graph) ---- */
+  .kb-add{ display:flex; gap:8px; padding:4px 0 10px; }
+  .kb-add input{
+    flex:1; border:1px solid var(--border); border-radius:10px; padding:8px 10px; font-size:13px;
+    background:var(--bg); color:var(--text); font-family:inherit; outline:none;
+  }
+  .kb-add button{
+    border:none; border-radius:10px; padding:0 14px; background:var(--accent); color:#fff; font-size:13px;
+    font-weight:600; cursor:pointer;
+  }
+  #kbGraph{
+    width:100%; height:200px; border-radius:14px; border:1px solid var(--border); background:var(--bg); cursor:grab;
+    display:block;
+  }
+  #kbGraph.dragging{ cursor:grabbing; }
+  .kb-empty{ font-size:12px; color:var(--text-tertiary); padding:10px 0; }
+  .kb-detail{
+    margin-top:8px; padding:10px 12px; border-radius:12px; background:var(--bg); border:1px solid var(--border);
+    font-size:12.5px; color:var(--text-secondary); line-height:1.5; display:none;
+  }
+  .kb-detail.show{ display:flex; gap:10px; align-items:flex-start; }
+  .kb-detail span{ flex:1; }
+  .kb-detail button{
+    border:none; background:none; color:var(--text-tertiary); cursor:pointer; font-size:14px; line-height:1; flex:0 0 auto;
+  }
+  .kb-detail button:hover{ color:var(--danger); }
+
+  /* ---- Integrations ---- */
+  .integration-btn{
+    border:1px solid var(--border); border-radius:10px; padding:7px 14px; background:var(--bg-elevated);
+    color:var(--accent); font-size:12.5px; font-weight:600; cursor:pointer;
+  }
+  .integration-btn.connected{ color:var(--danger); }
+  .integration-btn:disabled{ opacity:0.4; cursor:not-allowed; }
+
+  /* ---- Confirmation card (device actions) ---- */
+  .confirm-card{
+    border:1px solid var(--warn); border-radius:16px; padding:12px 14px; background:rgba(255,149,0,0.08);
+    max-width:78%; box-shadow:var(--shadow-sm); animation:rise 260ms cubic-bezier(.2,.8,.2,1);
+  }
+  .confirm-card .label{ font-size:13.5px; margin-bottom:10px; }
+  .confirm-card .actions{ display:flex; gap:8px; }
+  .confirm-card button{
+    flex:1; padding:8px 0; border-radius:10px; border:none; font-size:13px; font-weight:600; cursor:pointer;
+  }
+  .confirm-card .confirm-btn{ background:var(--accent); color:#fff; }
+  .confirm-card .cancel-btn{ background:var(--bg); color:var(--text-secondary); border:1px solid var(--border) !important; }
+  .confirm-card.resolved{ opacity:0.6; pointer-events:none; }
+
+  @media (max-width:760px){
+    .brand-name{ max-width:36vw; }
+    main{ left:12px; right:12px; width:auto; max-width:none; top:auto; bottom:96px; height:56vh; }
+  }
+</style>
+</head>
+<body>
+
+<canvas id="worldCanvas"></canvas>
+<div id="worldHint">drag to orbit · scroll to zoom</div>
+<div id="labelLayer"></div>
+
+<header>
+  <div class="brand">
+    <div class="brand-orb" id="brandOrb"></div>
+    <div class="brand-text">
+      <div class="brand-name" id="brandName" contenteditable="true" spellcheck="false" title="Click to rename">Tony</div>
+      <div class="brand-sub">AI Assistant</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="icon-btn pressable" title="Uplink status" style="cursor:default;"><span class="status-dot" id="apiDot"></span></div>
+    <div class="icon-btn pressable" id="popoutBtn" title="Pop out chat panel">&#8599;</div>
+    <div class="theme-toggle pressable" id="themeToggle" title="Toggle dark mode"><div class="knob" id="themeKnob">&#9728;&#65039;</div></div>
+    <div class="icon-btn pressable" id="settingsBtn" title="Settings">&#9881;&#65039;</div>
+  </div>
+</header>
+
+<div id="resizeHandle"></div>
+<main id="chatPanel">
+  <div class="orb-section">
+    <div class="orb-wrap" id="orbWrap" data-state="idle"><div class="orb" id="orb"></div></div>
+    <div class="state-label" id="stateLabel">tap the mic, or type below</div>
+  </div>
+
+  <div class="transcript" id="transcript"></div>
+  <div class="suggestions" id="suggestions">
+    <div class="chip pressable" data-q="What's the weather in Dublin?">Weather in Dublin</div>
+    <div class="chip pressable" data-q="Convert 100 USD to EUR">Convert 100 USD to EUR</div>
+    <div class="chip pressable" data-q="Tell me a random fact">Random fact</div>
+    <div class="chip pressable" data-q="Ask the team: should we launch a subscription meal-planning app?">Ask the team a business question</div>
+  </div>
+
+  <div class="composer">
+    <input id="taskInput" type="text" placeholder="Message..." />
+    <button class="pressable" id="sendBtn" title="Send">&#8593;</button>
+  </div>
+  <div class="fullteam-hint" id="fullteamHint">Full team is <b>off</b> — say "ask the team" or tap the team button below for a multi-agent deep dive.</div>
+</main>
+
+<div id="dock">
+  <button class="pressable mic" id="micBtn" title="Speak (space)">&#127897;&#65039;</button>
+  <button class="pressable" id="muteBtn" title="Mute voice">&#128266;</button>
+  <button class="pressable" id="gestureBtn" title="Wave-to-talk (webcam)">&#128075;</button>
+  <button class="pressable" id="fullTeamBtn" title="Full team deep dive">&#128101;</button>
+  <span class="dock-status" id="dockStatus">ready</span>
+</div>
+
+<video id="camPreview" autoplay muted playsinline></video>
+<canvas id="camCanvas" width="48" height="36" style="display:none;"></canvas>
+
+<div class="sheet-backdrop" id="sheetBackdrop"></div>
+<div class="sheet" id="sheet">
+  <div class="sheet-handle"></div>
+
+  <h3>Identity</h3>
+  <div class="field-row">
+    <div>
+      <label>Assistant name</label>
+      <div class="desc">Changes what it calls itself, everywhere</div>
+    </div>
+    <input type="text" id="nameInput" maxlength="40" />
+  </div>
+
+  <h3>Appearance</h3>
+  <div class="field-row">
+    <label>Dark mode</label>
+    <button class="switch pressable" id="darkSwitch"></button>
+  </div>
+
+  <h3>Voice</h3>
+  <div class="field-row">
+    <label>Voice</label>
+    <select class="field-select" id="voiceSelect"></select>
+  </div>
+  <div class="field-row">
+    <label>Speaking rate</label>
+    <select class="field-select" id="rateSelect">
+      <option value="0.85">Slower</option>
+      <option value="1.0" selected>Normal</option>
+      <option value="1.2">Faster</option>
+    </select>
+  </div>
+  <div class="field-row">
+    <label>Keep listening after replies</label>
+    <button class="switch pressable" id="loopSwitch"></button>
+  </div>
+
+  <h3>Full team</h3>
+  <div class="field-row">
+    <div><label>Full team deep dive</label><div class="desc">Runs all 11 specialist agents instead of answering directly</div></div>
+    <button class="switch pressable" id="fullTeamSwitch"></button>
+  </div>
+  <div class="field-row">
+    <div><label>Wave-to-talk</label><div class="desc">Webcam gesture control — nothing is recorded or uploaded</div></div>
+    <button class="switch pressable" id="gestureSwitch"></button>
+  </div>
+
+  <h3>Skills</h3>
+  <div class="field-row">
+    <label>Companion</label>
+    <select class="field-select" id="skillCompanionSelect"></select>
+  </div>
+  <div class="skills-grid" id="skillsGrid"></div>
+
+  <h3>Integrations</h3>
+  <div class="field-row">
+    <div>
+      <label>Gmail</label>
+      <div class="desc" id="gmailDesc">Checking…</div>
+    </div>
+    <button class="pressable integration-btn" id="gmailBtn">Connect</button>
+  </div>
+
+  <h3>Knowledge base</h3>
+  <div class="kb-add">
+    <input type="text" id="kbInput" placeholder="Add something it should always know…" maxlength="300" />
+    <button class="pressable" id="kbAddBtn">Add</button>
+  </div>
+  <canvas id="kbGraph" width="380" height="200"></canvas>
+  <div class="kb-detail" id="kbDetail"></div>
+
+  <div class="sheet-foot">
+    Live knowledge comes from a few free public APIs (weather, Wikipedia, currency, facts), called only when a question needs current or verifiable data. Device actions (Apple Music, WhatsApp, email, calendar, restaurant search) only run where supported and always ask you to confirm first — nothing executes silently, and restaurant search opens OpenTable pre-filled rather than booking automatically (no consumer API exists for that). Gmail requires connecting your own account above. Voice recognition uses your browser's built-in Speech API — nothing is recorded or stored.
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   THEME — default light, blue accent; persisted; smooth cross-fade
+============================================================ */
+const root = document.documentElement;
+const themeToggle = document.getElementById('themeToggle');
+const themeKnob = document.getElementById('themeKnob');
+const darkSwitch = document.getElementById('darkSwitch');
+
+function applyTheme(t){
+  root.setAttribute('data-theme', t);
+  themeKnob.innerHTML = t === 'dark' ? '&#127769;' : '&#9728;&#65039;';
+  darkSwitch.classList.toggle('on', t === 'dark');
+  localStorage.setItem('tony-theme', t);
+}
+function toggleTheme(){
+  applyTheme(root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+}
+applyTheme(localStorage.getItem('tony-theme') || 'light'); // light is the default, per spec
+themeToggle.addEventListener('click', toggleTheme);
+darkSwitch.addEventListener('click', toggleTheme);
+
+/* ============================================================
+   RESIZABLE CHAT PANEL — drag the handle to resize (desktop only)
+============================================================ */
+const chatPanel = document.getElementById('chatPanel');
+const resizeHandle = document.getElementById('resizeHandle');
+(function initResize(){
+  let dragging = false;
+  const savedWidth = localStorage.getItem('tony-panel-width');
+  if(savedWidth) applyPanelWidth(Number(savedWidth));
+  function applyPanelWidth(px){
+    const w = Math.max(300, Math.min(720, px));
+    chatPanel.style.width = w + 'px';
+    resizeHandle.style.right = w + 'px';
+  }
+  resizeHandle.addEventListener('pointerdown', (e) => { dragging = true; e.preventDefault(); });
+  window.addEventListener('pointermove', (e) => {
+    if(!dragging) return;
+    const width = window.innerWidth - e.clientX - 16;
+    applyPanelWidth(width);
+  });
+  window.addEventListener('pointerup', () => {
+    if(!dragging) return;
+    dragging = false;
+    localStorage.setItem('tony-panel-width', parseInt(chatPanel.style.width) || 400);
+  });
+})();
+
+/* ============================================================
+   POP-OUT CHAT — a second window, kept in sync live
+============================================================ */
+const isPopout = new URLSearchParams(location.search).get('popout') === '1';
+if(isPopout) document.body.classList.add('popout-mode');
+
+let syncChannel = null;
+try{ syncChannel = new BroadcastChannel('tony-chat-sync'); } catch(e){ /* unsupported — chat still works locally */ }
+
+document.getElementById('popoutBtn').addEventListener('click', () => {
+  window.open(location.pathname + '?popout=1', 'tonyChat', 'width=440,height=720');
+});
+
+function broadcastBubble(who, text){
+  syncChannel?.postMessage({ type:'bubble', who, text });
+}
+if(syncChannel){
+  syncChannel.onmessage = (e) => {
+    if(e.data?.type === 'bubble') addBubble(e.data.who, e.data.text, /*fromSync*/ true);
+  };
+}
+
+/* ============================================================
+   EDITABLE NAME
+============================================================ */
+const brandName = document.getElementById('brandName');
+const nameInput = document.getElementById('nameInput');
+let assistantName = localStorage.getItem('tony-name') || 'Tony';
+
+function setName(n){
+  const clean = (n || '').replace(/[<>]/g, '').trim().slice(0, 40) || 'Tony';
+  assistantName = clean;
+  brandName.textContent = clean;
+  nameInput.value = clean;
+  localStorage.setItem('tony-name', clean);
+  window.TonyWorld?.setName(clean);
+}
+setName(assistantName);
+
+brandName.addEventListener('blur', () => setName(brandName.textContent));
+brandName.addEventListener('keydown', (e) => { if(e.key === 'Enter'){ e.preventDefault(); brandName.blur(); } });
+nameInput.addEventListener('change', () => setName(nameInput.value));
+
+/* ============================================================
+   SETTINGS SHEET
+============================================================ */
+const sheet = document.getElementById('sheet');
+const sheetBackdrop = document.getElementById('sheetBackdrop');
+document.getElementById('settingsBtn').addEventListener('click', () => {
+  sheet.classList.add('open'); sheetBackdrop.classList.add('open');
+  loadSkillsPanel();
+  loadKnowledgePanel();
+  loadIntegrationsPanel();
+});
+sheetBackdrop.addEventListener('click', () => {
+  sheet.classList.remove('open'); sheetBackdrop.classList.remove('open');
+  stopGraphLoop();
+});
+
+/* ============================================================
+   STATE
+============================================================ */
+const orbWrap = document.getElementById('orbWrap');
+const orb = document.getElementById('orb');
+const stateLabel = document.getElementById('stateLabel');
+const transcript = document.getElementById('transcript');
+const taskInput = document.getElementById('taskInput');
+const sendBtn = document.getElementById('sendBtn');
+const micBtn = document.getElementById('micBtn');
+const muteBtn = document.getElementById('muteBtn');
+const gestureBtn = document.getElementById('gestureBtn');
+const fullTeamBtn = document.getElementById('fullTeamBtn');
+const dockStatus = document.getElementById('dockStatus');
+const fullteamHint = document.getElementById('fullteamHint');
+const fullTeamSwitch = document.getElementById('fullTeamSwitch');
+const gestureSwitch = document.getElementById('gestureSwitch');
+const loopSwitch = document.getElementById('loopSwitch');
+
+let orbState = 'idle';
+let muted = false;
+let fullTeamOn = false;
+let gestureOn = false;
+let voiceLoopOn = false;
+let conversationHistory = [];
+const MAX_HISTORY_TURNS = 12;
+let currentAmp = 0;
+
+function setOrbState(s, detail){
+  orbState = s;
+  orbWrap.setAttribute('data-state', s);
+  const labels = { idle:'tap the mic, or type below', listening:'listening…', thinking:`${assistantName} is thinking…`, speaking:`${assistantName} is speaking…`, error: detail || 'something went wrong — tap the mic to retry' };
+  stateLabel.textContent = labels[s];
+  dockStatus.textContent = s === 'idle' ? 'ready' : labels[s];
+  micBtn.classList.toggle('on', s === 'listening');
+  window.TonyWorld?.setState(s);
+  if(s === 'error'){
+    clearTimeout(setOrbState._recoverTimer);
+    setOrbState._recoverTimer = setTimeout(() => { if(orbState === 'error') setOrbState('idle'); }, 5000);
+  }
+}
+function setAmp(v){
+  currentAmp = Math.max(0, Math.min(1, v));
+  orb.style.setProperty('--amp', currentAmp.toFixed(3));
+  window.TonyWorld?.setAmp(currentAmp);
+}
+function decayAmp(){ setAmp(currentAmp * 0.85); requestAnimationFrame(decayAmp); }
+decayAmp();
+
+function escapeHtml(s){ return (s || '').replace(/</g,'&lt;'); }
+const suggestions = document.getElementById('suggestions');
+document.querySelectorAll('.chip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    const q = chip.getAttribute('data-q');
+    addBubble('you', q);
+    handleUtterance(q);
+  });
+});
+function addBubble(who, text, fromSync){
+  suggestions.classList.add('hidden');
+  const row = document.createElement('div');
+  row.className = `bubble-row ${who === 'you' ? 'you' : 'tony'}`;
+  row.innerHTML = `<div class="bubble">${escapeHtml(text)}</div>`;
+  transcript.appendChild(row);
+  chatPanel.scrollTo({ top: chatPanel.scrollHeight, behavior:'smooth' });
+  if(!fromSync) broadcastBubble(who, text);
+  return row;
+}
+
+/* ============================================================
+   VOICE OUTPUT
+============================================================ */
+const synth = window.speechSynthesis;
+let chosenVoice = null;
+function loadVoices(){
+  if(!synth) return;
+  const voices = synth.getVoices();
+  if(!voices.length) return;
+  const sel = document.getElementById('voiceSelect');
+  sel.innerHTML = '';
+  const english = voices.filter(v => v.lang.startsWith('en'));
+  (english.length ? english : voices).forEach(v => {
+    const opt = document.createElement('option');
+    opt.value = v.name; opt.textContent = v.name.replace(/^Google |^Microsoft /, '');
+    sel.appendChild(opt);
+  });
+  chosenVoice = english[0] || voices[0];
+  sel.value = chosenVoice ? chosenVoice.name : '';
+  sel.onchange = () => { chosenVoice = voices.find(v => v.name === sel.value) || chosenVoice; };
+}
+loadVoices();
+if(synth) synth.onvoiceschanged = loadVoices;
+let speakRate = 1.0;
+document.getElementById('rateSelect').addEventListener('change', (e) => { speakRate = Number(e.target.value); });
+
+function speak(text){
+  return new Promise((resolve) => {
+    if(!synth || muted || !text){ resolve(); return; }
+    synth.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    if(chosenVoice) u.voice = chosenVoice;
+    u.rate = speakRate;
+    setOrbState('speaking');
+    u.onboundary = () => setAmp(0.45 + Math.random() * 0.45);
+    u.onend = () => { setAmp(0); resolve(); };
+    u.onerror = () => { setAmp(0); resolve(); };
+    synth.speak(u);
+  });
+}
+muteBtn.addEventListener('click', () => {
+  muted = !muted;
+  muteBtn.innerHTML = muted ? '&#128263;' : '&#128266;';
+  muteBtn.classList.toggle('toggled', muted);
+  if(muted) synth.cancel();
+});
+
+/* ============================================================
+   VOICE INPUT
+============================================================ */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let recognition = null, recognizing = false;
+let audioCtx, analyser, micStream, ampRaf;
+let startWatchdog = null;
+
+if(!SR){
+  micBtn.disabled = true;
+  micBtn.title = 'Voice input needs Chrome, Edge, or Safari — this browser doesn\'t support it';
+  micBtn.style.opacity = '0.4';
+  console.warn('[Tony] SpeechRecognition API not found on window — voice input disabled in this browser.');
+}
+
+async function startMicVisualizer(){
+  try{
+    micStream = await navigator.mediaDevices.getUserMedia({ audio:true });
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const src = audioCtx.createMediaStreamSource(micStream);
+    analyser = audioCtx.createAnalyser(); analyser.fftSize = 512;
+    src.connect(analyser);
+    const data = new Uint8Array(analyser.frequencyBinCount);
+    const tick = () => {
+      analyser.getByteTimeDomainData(data);
+      let sum = 0; for(let i=0;i<data.length;i++){ const d=(data[i]-128)/128; sum += d*d; }
+      setAmp(Math.sqrt(sum/data.length) * 4.2);
+      ampRaf = requestAnimationFrame(tick);
+    };
+    tick();
+  } catch(e){ console.warn('[Tony] Mic visualizer unavailable (amplitude ring won\'t react, but recognition can still work):', e.message); }
+}
+function stopMicVisualizer(){
+  if(ampRaf) cancelAnimationFrame(ampRaf);
+  if(micStream) micStream.getTracks().forEach(t => t.stop());
+  if(audioCtx) audioCtx.close();
+  micStream = null; audioCtx = null;
+}
+function initRecognition(){
+  if(!SR) return null;
+  const r = new SR();
+  r.lang = 'en-US'; r.interimResults = true; r.continuous = false; r.maxAlternatives = 1;
+  r.onstart = () => {
+    clearTimeout(startWatchdog);
+    recognizing = true; setOrbState('listening'); startMicVisualizer();
+    console.log('[Tony] Speech recognition started.');
+  };
+  r.onresult = (e) => {
+    let interim = '', final = '';
+    for(let i = e.resultIndex; i < e.results.length; i++){
+      const t = e.results[i][0].transcript;
+      if(e.results[i].isFinal) final += t; else interim += t;
+    }
+    if(final){ addBubble('you', final.trim()); handleUtterance(final.trim()); }
+  };
+  r.onerror = (e) => {
+    clearTimeout(startWatchdog);
+    console.warn('[Tony] Speech recognition error:', e.error);
+    if(e.error === 'no-speech' || e.error === 'aborted') return;
+    const messages = {
+      'not-allowed': 'microphone access blocked — allow it in your browser\'s site settings, then retry',
+      'service-not-allowed': 'microphone access blocked — allow it in your browser\'s site settings, then retry',
+      'audio-capture': 'no microphone found — check it\'s connected and not in use elsewhere',
+      'network': 'voice recognition needs an internet connection (it calls your browser\'s speech service)',
+    };
+    setOrbState('error', messages[e.error] || `voice error (${e.error}) — tap the mic to retry`);
+  };
+  r.onend = () => {
+    clearTimeout(startWatchdog);
+    recognizing = false; stopMicVisualizer(); setAmp(0);
+    if(voiceLoopOn && orbState !== 'thinking' && orbState !== 'speaking'){
+      setTimeout(() => { if(voiceLoopOn) startListening(); }, 350);
+    } else if(orbState === 'listening'){ setOrbState('idle'); }
+  };
+  return r;
+}
+function startListening(){
+  if(!SR){ dockStatus.textContent = 'voice unsupported here'; return; }
+  if(recognizing) return;
+  if(synth && synth.speaking) synth.cancel();
+  if(!recognition) recognition = initRecognition();
+  try{
+    recognition.start();
+    // Some browsers fail to reach their speech service (network policy,
+    // blocked host, etc.) without ever firing onstart OR onerror — this
+    // catches that silent failure instead of leaving the mic looking "on"
+    // forever with nothing actually happening.
+    clearTimeout(startWatchdog);
+    startWatchdog = setTimeout(() => {
+      if(!recognizing){
+        console.warn('[Tony] Speech recognition never started — likely blocked network access to the browser\'s speech service.');
+        setOrbState('error', 'voice recognition isn\'t responding — your network may be blocking it, or try Chrome/Edge');
+      }
+    }, 4000);
+  } catch(e){
+    console.warn('[Tony] recognition.start() threw:', e.message);
+    setOrbState('error', `couldn't start listening (${e.message})`);
+  }
+}
+function stopListening(){ if(recognition && recognizing) recognition.stop(); }
+micBtn.addEventListener('click', () => {
+  if(!SR) return;
+  if(orbState === 'listening') stopListening();
+  else if(['idle','error','speaking'].includes(orbState)) startListening();
+});
+document.addEventListener('keydown', (e) => {
+  if(e.code === 'Space' && document.activeElement !== taskInput && document.activeElement !== brandName){
+    e.preventDefault(); micBtn.click();
+  }
+});
+loopSwitch.addEventListener('click', () => {
+  voiceLoopOn = !voiceLoopOn;
+  loopSwitch.classList.toggle('on', voiceLoopOn);
+  if(voiceLoopOn && orbState === 'idle') startListening();
+});
+
+/* ============================================================
+   FULL TEAM toggle (+ auto-detect phrases)
+============================================================ */
+function setFullTeam(on){
+  fullTeamOn = on;
+  fullTeamBtn.classList.toggle('toggled', on);
+  fullTeamSwitch.classList.toggle('on', on);
+  fullteamHint.innerHTML = on
+    ? `Full team is <b>on</b> — your next message runs all 11 specialist agents.`
+    : `Full team is <b>off</b> — say "ask the team" or tap the team button below for a multi-agent deep dive.`;
+}
+fullTeamBtn.addEventListener('click', () => setFullTeam(!fullTeamOn));
+fullTeamSwitch.addEventListener('click', () => setFullTeam(!fullTeamOn));
+
+const FULL_TEAM_PHRASES = /\b(ask the team|full team|deep dive|everyone'?s opinion|whole team|get the team)\b/i;
+
+gestureSwitch.addEventListener('click', () => setGesture(!gestureOn));
+
+/* ============================================================
+   SKILLS PANEL — assign which tools each companion can use
+============================================================ */
+const COMPANIONS = ['Tony','Sherlock','Venture','Ledger','Forge','Neural','Pulse','Pixel','Flow','Hunter','Sentinel','Guardian'];
+const skillCompanionSelect = document.getElementById('skillCompanionSelect');
+const skillsGrid = document.getElementById('skillsGrid');
+let allSkills = [];
+let skillAssignments = {};
+
+if(skillCompanionSelect.options.length === 0){
+  COMPANIONS.forEach(c => {
+    const opt = document.createElement('option');
+    opt.value = c; opt.textContent = c;
+    skillCompanionSelect.appendChild(opt);
+  });
+}
+
+async function loadSkillsPanel(){
+  try{
+    if(!allSkills.length){
+      const res = await fetch(`${window.location.origin}/skills`);
+      allSkills = (await res.json()).skills || [];
+    }
+    const res2 = await fetch(`${window.location.origin}/companions/skills`);
+    skillAssignments = await res2.json();
+    renderSkillsGrid();
+  } catch(err){
+    skillsGrid.innerHTML = `<div class="kb-empty">Couldn't load skills — is the backend running?</div>`;
+  }
+}
+function renderSkillsGrid(){
+  const companion = skillCompanionSelect.value || 'Tony';
+  const assigned = new Set(skillAssignments[companion] || []);
+  skillsGrid.innerHTML = '';
+  allSkills.forEach(s => {
+    const chip = document.createElement('div');
+    chip.className = 'skill-chip' + (assigned.has(s.id) ? ' on' : '');
+    chip.innerHTML = `<span class="dot"></span>${escapeHtml(s.label)}${s.requires_confirmation ? ' <span class="confirm-mark">confirm</span>' : ''}`;
+    chip.title = s.description || '';
+    chip.addEventListener('click', () => toggleSkill(companion, s.id, chip));
+    skillsGrid.appendChild(chip);
+  });
+}
+async function toggleSkill(companion, skillId, chip){
+  const current = new Set(skillAssignments[companion] || []);
+  if(current.has(skillId)) current.delete(skillId); else current.add(skillId);
+  const updated = Array.from(current);
+  chip.classList.toggle('on');
+  skillAssignments[companion] = updated;
+  try{
+    await fetch(`${window.location.origin}/companions/skills`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ codename: companion, skill_ids: updated })
+    });
+  } catch(err){ console.warn('Failed to save skill assignment:', err.message); }
+}
+skillCompanionSelect.addEventListener('change', renderSkillsGrid);
+
+/* ============================================================
+   KNOWLEDGE BASE PANEL — rendered as a network graph.
+   Nodes = saved entries. Edges = real lexical overlap between them
+   (shared significant words), not a fake/decorative layout — entries
+   about similar things actually pull toward each other.
+============================================================ */
+const kbInput = document.getElementById('kbInput');
+const kbAddBtn = document.getElementById('kbAddBtn');
+const kbGraph = document.getElementById('kbGraph');
+const kbDetail = document.getElementById('kbDetail');
+const kbCtx = kbGraph.getContext('2d');
+
+const STOPWORDS = new Set(['the','a','an','is','are','was','were','to','of','and','or','in','on','at','for','with','my','i','me','it','this','that','be','has','have','had','as','so','do','does','did','you','your','their','they']);
+function keywordsOf(text){
+  return new Set((text.toLowerCase().match(/[a-z0-9']+/g) || []).filter(w => w.length > 2 && !STOPWORDS.has(w)));
+}
+
+let kbNodes = [];
+let kbEdges = [];
+let kbRafId = null;
+let kbSelected = null;
+let kbDrag = null;
+
+function buildGraph(entries){
+  const w = kbGraph.width, h = kbGraph.height;
+  kbNodes = entries.map((e, i) => ({
+    id: e.id, text: e.text, kw: keywordsOf(e.text),
+    x: w/2 + Math.cos(i) * 40 + (Math.random()-0.5) * 20,
+    y: h/2 + Math.sin(i) * 40 + (Math.random()-0.5) * 20,
+    vx: 0, vy: 0,
+  }));
+  kbEdges = [];
+  for(let i = 0; i < kbNodes.length; i++){
+    for(let j = i+1; j < kbNodes.length; j++){
+      const a = kbNodes[i], b = kbNodes[j];
+      let shared = 0;
+      a.kw.forEach(w2 => { if(b.kw.has(w2)) shared++; });
+      const denom = Math.min(a.kw.size, b.kw.size) || 1;
+      const strength = shared / denom;
+      if(strength > 0.15) kbEdges.push({ a: i, b: j, strength });
+    }
+  }
+}
+
+function stepGraph(){
+  const w = kbGraph.width, h = kbGraph.height;
+  const cx = w/2, cy = h/2;
+  // repulsion between all pairs
+  for(let i = 0; i < kbNodes.length; i++){
+    for(let j = i+1; j < kbNodes.length; j++){
+      const a = kbNodes[i], b = kbNodes[j];
+      let dx = a.x - b.x, dy = a.y - b.y;
+      let dist2 = dx*dx + dy*dy || 0.01;
+      const force = 900 / dist2;
+      const dist = Math.sqrt(dist2);
+      dx /= dist; dy /= dist;
+      a.vx += dx * force; a.vy += dy * force;
+      b.vx -= dx * force; b.vy -= dy * force;
+    }
+  }
+  // spring attraction along real edges
+  kbEdges.forEach(({a: ai, b: bi, strength}) => {
+    const a = kbNodes[ai], b = kbNodes[bi];
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const dist = Math.sqrt(dx*dx + dy*dy) || 0.01;
+    const targetDist = 70 - strength * 35;
+    const force = (dist - targetDist) * 0.02;
+    const fx = (dx/dist) * force, fy = (dy/dist) * force;
+    a.vx += fx; a.vy += fy;
+    b.vx -= fx; b.vy -= fy;
+  });
+  // gentle centering so the graph doesn't drift off-canvas
+  kbNodes.forEach(n => {
+    n.vx += (cx - n.x) * 0.002;
+    n.vy += (cy - n.y) * 0.002;
+  });
+  kbNodes.forEach(n => {
+    if(n === kbDrag) return;
+    n.vx *= 0.82; n.vy *= 0.82;
+    n.x += n.vx; n.y += n.vy;
+    n.x = Math.max(14, Math.min(w-14, n.x));
+    n.y = Math.max(14, Math.min(h-14, n.y));
+  });
+}
+
+function drawGraph(){
+  const w = kbGraph.width, h = kbGraph.height;
+  kbCtx.clearRect(0, 0, w, h);
+  if(!kbNodes.length){
+    kbCtx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--text-tertiary').trim() || '#aaa';
+    kbCtx.font = '12px -apple-system, sans-serif';
+    kbCtx.textAlign = 'center';
+    kbCtx.fillText('Nothing saved yet — add something above', w/2, h/2);
+    return;
+  }
+  const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#007AFF';
+  const border = getComputedStyle(document.documentElement).getPropertyValue('--border-strong').trim() || 'rgba(0,0,0,0.2)';
+
+  kbEdges.forEach(({a, b, strength}) => {
+    const na = kbNodes[a], nb = kbNodes[b];
+    kbCtx.strokeStyle = border;
+    kbCtx.globalAlpha = 0.25 + strength * 0.5;
+    kbCtx.lineWidth = 1 + strength;
+    kbCtx.beginPath(); kbCtx.moveTo(na.x, na.y); kbCtx.lineTo(nb.x, nb.y); kbCtx.stroke();
+  });
+  kbCtx.globalAlpha = 1;
+
+  kbNodes.forEach(n => {
+    const isSelected = kbSelected && kbSelected.id === n.id;
+    kbCtx.beginPath();
+    kbCtx.arc(n.x, n.y, isSelected ? 9 : 6, 0, Math.PI*2);
+    kbCtx.fillStyle = isSelected ? accent : (border || '#999');
+    kbCtx.fill();
+    if(isSelected){ kbCtx.lineWidth = 2; kbCtx.strokeStyle = accent; kbCtx.stroke(); }
+  });
+}
+
+function graphLoop(){
+  stepGraph();
+  drawGraph();
+  kbRafId = requestAnimationFrame(graphLoop);
+}
+function startGraphLoop(){ if(!kbRafId) graphLoop(); }
+function stopGraphLoop(){ if(kbRafId){ cancelAnimationFrame(kbRafId); kbRafId = null; } }
+
+function nodeAt(px, py){
+  return kbNodes.find(n => Math.hypot(n.x - px, n.y - py) < 12);
+}
+function canvasPoint(e){
+  const rect = kbGraph.getBoundingClientRect();
+  const scaleX = kbGraph.width / rect.width, scaleY = kbGraph.height / rect.height;
+  return { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
+}
+kbGraph.addEventListener('pointerdown', (e) => {
+  const p = canvasPoint(e);
+  const n = nodeAt(p.x, p.y);
+  if(n){ kbDrag = n; kbGraph.classList.add('dragging'); selectKnowledgeNode(n); }
+});
+kbGraph.addEventListener('pointermove', (e) => {
+  if(!kbDrag) return;
+  const p = canvasPoint(e);
+  kbDrag.x = p.x; kbDrag.y = p.y; kbDrag.vx = 0; kbDrag.vy = 0;
+});
+window.addEventListener('pointerup', () => { kbDrag = null; kbGraph.classList.remove('dragging'); });
+kbGraph.addEventListener('click', (e) => {
+  if(kbDrag) return;
+  const p = canvasPoint(e);
+  const n = nodeAt(p.x, p.y);
+  if(n) selectKnowledgeNode(n); else { kbSelected = null; kbDetail.classList.remove('show'); }
+});
+
+function selectKnowledgeNode(n){
+  kbSelected = n;
+  kbDetail.classList.add('show');
+  kbDetail.innerHTML = `<span>${escapeHtml(n.text)}</span><button title="Remove">&#10005;</button>`;
+  kbDetail.querySelector('button').addEventListener('click', async () => {
+    try{
+      await fetch(`${window.location.origin}/knowledge/${n.id}`, { method:'DELETE' });
+      kbSelected = null; kbDetail.classList.remove('show');
+      loadKnowledgePanel();
+    } catch(err){ console.warn('Failed to delete knowledge entry:', err.message); }
+  });
+}
+
+async function loadKnowledgePanel(){
+  try{
+    const res = await fetch(`${window.location.origin}/knowledge`);
+    const data = await res.json();
+    buildGraph(data.entries || []);
+    startGraphLoop();
+  } catch(err){
+    stopGraphLoop();
+    kbCtx.clearRect(0, 0, kbGraph.width, kbGraph.height);
+  }
+}
+async function addKnowledge(){
+  const text = kbInput.value.trim();
+  if(!text) return;
+  kbInput.value = '';
+  try{
+    await fetch(`${window.location.origin}/knowledge`, {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ text })
+    });
+    loadKnowledgePanel();
+  } catch(err){ console.warn('Failed to add knowledge entry:', err.message); }
+}
+kbAddBtn.addEventListener('click', addKnowledge);
+kbInput.addEventListener('keydown', (e) => { if(e.key === 'Enter'){ e.preventDefault(); addKnowledge(); } });
+
+/* ============================================================
+   INTEGRATIONS PANEL — Gmail (OAuth2)
+============================================================ */
+const gmailDesc = document.getElementById('gmailDesc');
+const gmailBtn = document.getElementById('gmailBtn');
+let gmailPollTimer = null;
+
+async function loadIntegrationsPanel(){
+  try{
+    const res = await fetch(`${window.location.origin}/integrations/gmail/status`);
+    const s = await res.json();
+    renderGmailStatus(s);
+  } catch(err){
+    gmailDesc.textContent = "Couldn't check — is the backend running?";
+    gmailBtn.disabled = true;
+  }
+}
+function renderGmailStatus(s){
+  if(!s.configured){
+    gmailDesc.textContent = 'Needs Google API credentials in .env first — see gmail_integration.py';
+    gmailBtn.textContent = 'Connect'; gmailBtn.disabled = true; gmailBtn.classList.remove('connected');
+    return;
+  }
+  gmailBtn.disabled = false;
+  if(s.connected){
+    gmailDesc.textContent = `Connected as ${s.email || 'your account'}`;
+    gmailBtn.textContent = 'Disconnect'; gmailBtn.classList.add('connected');
+  } else {
+    gmailDesc.textContent = 'Not connected';
+    gmailBtn.textContent = 'Connect'; gmailBtn.classList.remove('connected');
+  }
+}
+gmailBtn.addEventListener('click', async () => {
+  if(gmailBtn.classList.contains('connected')){
+    await fetch(`${window.location.origin}/integrations/gmail/disconnect`, { method:'POST' });
+    loadIntegrationsPanel();
+    return;
+  }
+  try{
+    const res = await fetch(`${window.location.origin}/integrations/gmail/connect`);
+    const data = await res.json();
+    if(data.auth_url){
+      window.open(data.auth_url, 'gmailAuth', 'width=480,height=680');
+      clearInterval(gmailPollTimer);
+      let checks = 0;
+      gmailPollTimer = setInterval(() => {
+        checks++;
+        loadIntegrationsPanel();
+        if(checks > 20) clearInterval(gmailPollTimer); // stop after ~40s
+      }, 2000);
+    }
+  } catch(err){ console.warn('Gmail connect failed:', err.message); }
+});
+
+/* ============================================================
+   BACKEND — quick (default) vs full team (deep dive)
+============================================================ */
+async function checkHealth(){
+  const dot = document.getElementById('apiDot');
+  try{
+    const res = await fetch(`${window.location.origin}/health`);
+    dot.classList.toggle('on', res.ok);
+  } catch (e) { dot.classList.remove('on'); }
+}
+checkHealth(); setInterval(checkHealth, 8000);
+
+async function askQuick(task){
+  setOrbState('thinking');
+  try{
+    const res = await fetch(`${window.location.origin}/tony/quick`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ task, history: conversationHistory, assistant_name: assistantName })
+    });
+    if(!res.ok) throw new Error(`backend returned ${res.status}`);
+    const data = await res.json();
+    if(data.error) throw new Error(data.error);
+    const reply = data.reply || "I didn't get anything back — try again.";
+    conversationHistory.push({role:'user',content:task},{role:'assistant',content:reply});
+    conversationHistory = conversationHistory.slice(-MAX_HISTORY_TURNS * 2);
+    return { text: reply, pendingAction: (data.metadata && data.metadata.pending_action) || null };
+  } catch(err){
+    return { text: `I can't reach the backend right now (${err.message}). Start it with "uvicorn server:app --port 8420" from the project folder.`, pendingAction: null };
+  }
+}
+
+function addConfirmCard(pendingAction){
+  const row = document.createElement('div');
+  row.className = 'bubble-row tony';
+  const card = document.createElement('div');
+  card.className = 'confirm-card';
+  card.innerHTML = `
+    <div class="label">Go ahead and ${escapeHtml(pendingAction.label)}?</div>
+    <div class="actions">
+      <button class="confirm-btn pressable">Confirm</button>
+      <button class="cancel-btn pressable">Cancel</button>
+    </div>`;
+  row.appendChild(card);
+  transcript.appendChild(row);
+  chatPanel.scrollTo({ top: chatPanel.scrollHeight, behavior:'smooth' });
+
+  card.querySelector('.cancel-btn').addEventListener('click', () => {
+    card.classList.add('resolved');
+    card.querySelector('.label').textContent = 'Cancelled.';
+    card.querySelector('.actions').remove();
+  });
+  card.querySelector('.confirm-btn').addEventListener('click', async () => {
+    card.classList.add('resolved');
+    card.querySelector('.label').textContent = `Running: ${pendingAction.label}…`;
+    card.querySelector('.actions').remove();
+    try{
+      const res = await fetch(`${window.location.origin}/device/execute`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ name: pendingAction.name, arguments: pendingAction.arguments })
+      });
+      const result = await res.json();
+      if(result.error){
+        addBubble('tony', `That didn't work: ${result.error}`);
+      } else {
+        addBubble('tony', `Done — ${pendingAction.label}.`);
+      }
+    } catch(err){
+      addBubble('tony', `Couldn't run that: ${err.message}`);
+    }
+  });
+}
+
+const AGENT_META = {
+  Sherlock:{role:'Research', color:'#5E8BFF'}, Venture:{role:'Business', color:'#34C759'},
+  Ledger:{role:'Finance', color:'#30B0C7'}, Forge:{role:'Engineering', color:'#FF9500'},
+  Neural:{role:'AI Team', color:'#AF52DE'}, Pulse:{role:'Marketing', color:'#FF2D55'},
+  Pixel:{role:'Design', color:'#5856D6'}, Flow:{role:'Operations', color:'#64D2FF'},
+  Hunter:{role:'Sales', color:'#FFD60A'}, Sentinel:{role:'Security', color:'#8E8E93'},
+  Guardian:{role:'Legal & Compliance', color:'#FF3B30'},
+};
+
+function initials(name){ return (name || '?').slice(0,2).toUpperCase(); }
+
+async function askFullTeam(task){
+  setOrbState('thinking');
+
+  const room = document.createElement('div');
+  room.className = 'agent-room';
+  room.innerHTML = `
+    <div class="agent-room-head">
+      <div class="title"><span class="spinner"></span><span id="roomTitleText">${assistantName} is assembling the team…</span></div>
+      <div class="chevron">&#9662;</div>
+    </div>
+    <div class="agent-room-body" id="roomBody"></div>
+  `;
+  transcript.appendChild(room);
+  chatPanel.scrollTo({ top: chatPanel.scrollHeight, behavior:'smooth' });
+
+  const head = room.querySelector('.agent-room-head');
+  const roomBody = room.querySelector('#roomBody');
+  const roomTitleText = room.querySelector('#roomTitleText');
+  head.addEventListener('click', () => room.classList.toggle('collapsed'));
+
+  let finalText = null;
+  try{
+    const res = await fetch(`${window.location.origin}/run/stream`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ task, assistant_name: assistantName })
+    });
+    if(!res.ok || !res.body) throw new Error('backend unreachable');
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while(true){
+      const { done, value } = await reader.read();
+      if(done) break;
+      buffer += decoder.decode(value, { stream:true });
+      const lines = buffer.split('\n\n'); buffer = lines.pop();
+      for(const line of lines){
+        const dataLine = line.split('\n').find(l => l.startsWith('data:'));
+        if(!dataLine) continue;
+        const payload = dataLine.slice(5).trim();
+        if(!payload) continue;
+        let ev; try{ ev = JSON.parse(payload); } catch (e2) { continue; }
+
+        if(ev.type === 'stage' && ev.stage === 'tracks_started') window.TonyWorld?.broadcastPulse();
+
+        if(ev.type === 'team_done' && !ev.error){
+          const meta = AGENT_META[ev.codename] || { role: ev.team_name, color:'#8E8E93' };
+          window.TonyWorld?.pulseCompanion(ev.codename);
+          const row = document.createElement('div');
+          row.className = 'agent-row';
+          const excerpt = ev.output.length > 220 ? ev.output.slice(0, 220) + '…' : ev.output;
+          row.innerHTML = `
+            <div class="agent-avatar" style="background:${meta.color}">${initials(ev.codename)}</div>
+            <div class="agent-msg">
+              <span class="who">${ev.codename}</span><span class="role">${meta.role}</span>
+              ${ev.verdict ? `<div class="verdict-chip">&#9873; ${ev.verdict}</div>` : ''}
+              <div class="excerpt">${escapeHtml(excerpt)}</div>
+            </div>`;
+          row.querySelector('.excerpt').addEventListener('click', (e3) => {
+            e3.target.classList.toggle('expanded');
+            e3.target.textContent = e3.target.classList.contains('expanded') ? ev.output : excerpt;
+          });
+          roomBody.appendChild(row);
+          chatPanel.scrollTo({ top: chatPanel.scrollHeight, behavior:'smooth' });
+        }
+        if(ev.type === 'alert'){
+          window.TonyWorld?.flashAlert(ev.codename);
+          roomTitleText.textContent = `Flagged: ${ev.codename} — ${ev.verdict.replace(/-/g,' ').toLowerCase()}`;
+        }
+        if(ev.type === 'final') finalText = ev.final_response;
+        if(ev.type === 'error') throw new Error(ev.error || 'pipeline error');
+      }
+    }
+  } catch(err){
+    finalText = `I can't reach the backend right now (${err.message}).`;
+  }
+
+  window.TonyWorld?.pulseFinal();
+  head.classList.add('done');
+  roomTitleText.textContent = `${assistantName} — CEO synthesis (${roomBody.children.length} agents consulted)`;
+  const ceoRow = document.createElement('div');
+  ceoRow.className = 'agent-row ceo';
+  ceoRow.innerHTML = `
+    <div class="agent-avatar" style="background:var(--accent)">${initials(assistantName)}</div>
+    <div class="agent-msg"><span class="who">${escapeHtml(assistantName)}</span><span class="role">CEO</span>
+      <div class="excerpt">${escapeHtml(finalText || 'No response produced.')}</div>
+    </div>`;
+  roomBody.appendChild(ceoRow);
+  chatPanel.scrollTo({ top: chatPanel.scrollHeight, behavior:'smooth' });
+
+  return finalText || "The team finished but produced no final response — try again.";
+}
+
+let processing = false;
+async function handleUtterance(text){
+  if(!text || processing) return;
+  processing = true;
+  stopListening();
+
+  const useFullTeam = fullTeamOn || FULL_TEAM_PHRASES.test(text);
+  let answer;
+  if(useFullTeam){
+    answer = await askFullTeam(text);
+  } else {
+    const { text: reply, pendingAction } = await askQuick(text);
+    addBubble('tony', reply);
+    if(pendingAction) addConfirmCard(pendingAction);
+    answer = reply;
+  }
+  await speak(answer);
+
+  processing = false;
+  if(voiceLoopOn) startListening(); else setOrbState('idle');
+}
+sendBtn.addEventListener('click', () => {
+  const v = taskInput.value.trim();
+  if(!v) return;
+  taskInput.value = '';
+  addBubble('you', v);
+  handleUtterance(v);
+});
+taskInput.addEventListener('keydown', (e) => { if(e.key === 'Enter'){ e.preventDefault(); sendBtn.click(); } });
+
+/* ============================================================
+   GESTURE CONTROL — wave at the camera to start listening
+============================================================ */
+const camPreview = document.getElementById('camPreview');
+const camCanvas = document.getElementById('camCanvas');
+const camCtx = camCanvas.getContext('2d', { willReadFrequently:true });
+let camStream = null, gestureTimer = null, prevGray = null, centroidHistory = [], lastWave = 0;
+const WAVE_COOLDOWN_MS = 2500, WAVE_WINDOW_MS = 1300;
+
+async function startGesture(){
+  try{
+    camStream = await navigator.mediaDevices.getUserMedia({ video:{ width:160, height:120 }, audio:false });
+    camPreview.srcObject = camStream; camPreview.classList.add('on');
+    prevGray = null; centroidHistory = [];
+    gestureSample();
+  } catch(e){
+    console.warn('Camera unavailable:', e.message);
+    gestureOn = false; gestureBtn.classList.remove('toggled'); gestureSwitch.classList.remove('on');
+  }
+}
+function stopGesture(){
+  if(gestureTimer) clearTimeout(gestureTimer);
+  if(camStream) camStream.getTracks().forEach(t => t.stop());
+  camStream = null; camPreview.classList.remove('on'); prevGray = null; centroidHistory = [];
+}
+function gestureSample(){
+  if(!gestureOn) return;
+  const w = camCanvas.width, h = camCanvas.height;
+  try{
+    camCtx.drawImage(camPreview, 0, 0, w, h);
+    const frame = camCtx.getImageData(0, 0, w, h).data;
+    const gray = new Uint8ClampedArray(w * h);
+    for(let i=0, p=0; i<frame.length; i+=4, p++) gray[p] = (frame[i]*0.3 + frame[i+1]*0.59 + frame[i+2]*0.11) | 0;
+    if(prevGray){
+      let sumDiff = 0, sumWeightedX = 0;
+      for(let y=0; y<h; y++){
+        for(let x=0; x<w; x++){
+          const idx = y*w+x, d = Math.abs(gray[idx]-prevGray[idx]);
+          if(d > 25){ sumDiff += d; sumWeightedX += d*x; }
+        }
+      }
+      const now = performance.now();
+      if(sumDiff > 4000) centroidHistory.push({ t:now, x: sumWeightedX/sumDiff/w });
+      centroidHistory = centroidHistory.filter(p => now - p.t < WAVE_WINDOW_MS);
+      checkWave(now);
+    }
+    prevGray = gray;
+  } catch(e){}
+  gestureTimer = setTimeout(gestureSample, 80);
+}
+function checkWave(now){
+  if(now - lastWave < WAVE_COOLDOWN_MS || centroidHistory.length < 5) return;
+  const xs = centroidHistory.map(p => p.x);
+  if(Math.max.apply(null, xs) - Math.min.apply(null, xs) < 0.16) return;
+  let reversals = 0;
+  for(let i=2;i<xs.length;i++){
+    const d1 = xs[i-1]-xs[i-2], d2 = xs[i]-xs[i-1];
+    if(Math.abs(d1) > 0.01 && Math.abs(d2) > 0.01 && (d1>0) !== (d2>0)) reversals++;
+  }
+  if(reversals >= 2){ lastWave = now; centroidHistory = []; onWave(); }
+}
+function onWave(){
+  camPreview.classList.add('wave-detected');
+  setTimeout(() => camPreview.classList.remove('wave-detected'), 500);
+  micBtn.click();
+}
+function setGesture(on){
+  gestureOn = on;
+  gestureBtn.classList.toggle('toggled', gestureOn);
+  gestureSwitch.classList.toggle('on', gestureOn);
+  if(gestureOn) startGesture(); else stopGesture();
+}
+gestureBtn.addEventListener('click', () => setGesture(!gestureOn));
+
+setOrbState('idle');
+</script>
+
+<!-- ============================================================
+     3D WORLD VIEW — isolated ES module. Everything above this point
+     (chat, voice, skills, knowledge base) works completely on its own;
+     this only adds the visual layer on top, and fails gracefully to
+     the flat CSS orb (body.no-webgl) if the CDN or WebGL is unavailable.
+============================================================ -->
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+// Muted, desaturated palette (max ~65% saturation) — distinguishable without
+// reading as a garish rainbow. Tony keeps the single dominant brand accent;
+// everything else here is deliberately quieter than the app chrome.
+const COMPANION_COLORS = {
+  Sherlock:'#6E8FE0', Venture:'#57B08C', Ledger:'#4FADBE', Forge:'#D6935A',
+  Neural:'#9A83CC', Pulse:'#CC6E8C', Pixel:'#7C7ECC', Flow:'#5FA6C2',
+  Hunter:'#C2A85A', Sentinel:'#8E8E93', Guardian:'#C46464',
+};
+const COMPANION_ROLES = {
+  Sherlock:'Research', Venture:'Business', Ledger:'Finance', Forge:'Engineering',
+  Neural:'AI Team', Pulse:'Marketing', Pixel:'Design', Flow:'Operations',
+  Hunter:'Sales', Sentinel:'Security', Guardian:'Legal',
+};
+const COMPANION_ORDER = Object.keys(COMPANION_COLORS);
+
+function cssVar(name){ return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#007AFF'; }
+
+function initWorld(){
+  const canvas = document.getElementById('worldCanvas');
+  const labelLayer = document.getElementById('labelLayer');
+  if(!canvas || !window.WebGLRenderingContext) throw new Error('WebGL unsupported');
+
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias:true, alpha:true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(46, window.innerWidth / window.innerHeight, 0.1, 100);
+  // Elevated 3/4 angle — a tilt is what actually reads as "3D" at a glance,
+  // a flat side-on view (the old default) just looks like scattered circles.
+  camera.position.set(0.5, 5.4, 12.5);
+
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.07;
+  controls.minDistance = 8;
+  controls.maxDistance = 22;
+  controls.minPolarAngle = Math.PI * 0.18;
+  controls.maxPolarAngle = Math.PI * 0.62;
+  controls.autoRotate = true;
+  controls.autoRotateSpeed = 0.28; // gentle drift, not a spin
+  controls.target.set(0, 0.2, 0);
+  controls.addEventListener('start', () => { controls.autoRotate = false; document.getElementById('worldHint')?.classList.remove('show'); });
+
+  // ---- Post-processing: restrained bloom, not a blown-out glow ----
+  const composer = new EffectComposer(renderer);
+  composer.addPass(new RenderPass(scene, camera));
+  const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.55, 0.4, 0.82);
+  composer.addPass(bloomPass);
+  composer.addPass(new OutputPass());
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+  const keyLight = new THREE.PointLight(0xffffff, 0.9, 40);
+  keyLight.position.set(5, 9, 7);
+  scene.add(keyLight);
+  const fillLight = new THREE.PointLight(0x88aaff, 0.35, 40);
+  fillLight.position.set(-6, -3, -5);
+  scene.add(fillLight);
+
+  // ---- A tilted orbital particle band (one structured population, not
+  // generic noise) — this is what gives the scene spatial grounding.
+  const bandGroup = new THREE.Group();
+  bandGroup.rotation.x = Math.PI * 0.42;
+  bandGroup.rotation.z = 0.15;
+  scene.add(bandGroup);
+  {
+    const count = 260;
+    const geo = new THREE.BufferGeometry();
+    const pos = new Float32Array(count * 3);
+    for(let i = 0; i < count; i++){
+      const r = 7.6 + (Math.random() - 0.5) * 0.9;
+      const a = Math.random() * Math.PI * 2;
+      pos[i*3] = Math.cos(a) * r;
+      pos[i*3+1] = (Math.random() - 0.5) * 0.25;
+      pos[i*3+2] = Math.sin(a) * r;
+    }
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    const mat = new THREE.PointsMaterial({ color: new THREE.Color(cssVar('--accent')), size:0.05, transparent:true, opacity:0.4, sizeAttenuation:true });
+    bandGroup.add(new THREE.Points(geo, mat));
+  }
+
+  // ---- Tony (center): bright near-neutral core + accent rim glow ----
+  const tonyGroup = new THREE.Group();
+  scene.add(tonyGroup);
+
+  const coreMat = new THREE.MeshStandardMaterial({
+    color: 0xf4f7ff, emissive: new THREE.Color(cssVar('--accent')), emissiveIntensity: 0.35,
+    roughness: 0.3, metalness: 0.1,
+  });
+  const tony = new THREE.Mesh(new THREE.SphereGeometry(1.05, 48, 48), coreMat);
+  tonyGroup.add(tony);
+
+  // Rim shell — slightly larger, additive, accent-colored, back-side only —
+  // a cheap, effective fresnel-style glow without a custom shader.
+  const rimMat = new THREE.MeshBasicMaterial({
+    color: new THREE.Color(cssVar('--accent')), transparent:true, opacity:0.35,
+    side: THREE.BackSide, blending: THREE.AdditiveBlending,
+  });
+  const rim = new THREE.Mesh(new THREE.SphereGeometry(1.18, 48, 48), rimMat);
+  tonyGroup.add(rim);
+
+  const tonyLight = new THREE.PointLight(new THREE.Color(cssVar('--accent')), 1.1, 10);
+  tonyGroup.add(tonyLight);
+
+  const listenRing = new THREE.Mesh(
+    new THREE.RingGeometry(1.4, 1.5, 64),
+    new THREE.MeshBasicMaterial({ color: new THREE.Color(cssVar('--accent')), transparent:true, opacity:0, side:THREE.DoubleSide })
+  );
+  listenRing.rotation.x = Math.PI / 2;
+  scene.add(listenRing);
+
+  // ---- Companions: a tilted ring at a fixed radius (orbital, not random) ----
+  const radius = 5.6;
+  const companions = {};
+  const labelEls = {};
+
+  const tonyLabel = document.createElement('div');
+  tonyLabel.className = 'world-label tony';
+  const initialName = (localStorage.getItem('tony-name') || 'Tony').replace(/[<>]/g, '');
+  tonyLabel.innerHTML = `<span class="dot" style="background:${cssVar('--accent')}"></span><span id="tonyLabelText">${initialName}</span>`;
+  labelLayer.appendChild(tonyLabel);
+
+  COMPANION_ORDER.forEach((name, i) => {
+    const angle = (i / COMPANION_ORDER.length) * Math.PI * 2;
+    const color = new THREE.Color(COMPANION_COLORS[name]);
+    const mat = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.35, roughness: 0.4 });
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.3, 24, 24), mat);
+    const tiltY = Math.sin(angle * 2) * 0.55; // gentle wave, keeps the ring from reading flat
+    mesh.position.set(Math.cos(angle) * radius, tiltY, Math.sin(angle) * radius);
+    mesh.scale.setScalar(0.001); // entrance animation grows this in
+    scene.add(mesh);
+
+    const label = document.createElement('div');
+    label.className = 'world-label';
+    label.innerHTML = `<span class="dot" style="background:${COMPANION_COLORS[name]}"></span><span>${name}</span>`;
+    label.style.opacity = '0';
+    labelLayer.appendChild(label);
+    labelEls[name] = label;
+
+    companions[name] = { mesh, mat, baseColor: color.clone(), angle, baseY: tiltY, phase: i * 1.7, entranceDelay: i * 60 };
+  });
+
+  const activeBeams = [];
+  function fireBeam(companionName){
+    const c = companions[companionName];
+    if(!c) return;
+    const points = [tonyGroup.position.clone(), c.mesh.position.clone()];
+    const geo = new THREE.BufferGeometry().setFromPoints(points);
+    const mat = new THREE.LineBasicMaterial({ color: c.baseColor, transparent:true, opacity:0.85 });
+    const line = new THREE.Line(geo, mat);
+    scene.add(line);
+    activeBeams.push({ line, mat, life: 1.0 });
+    c.mat.emissiveIntensity = 1.3;
+    c.pulseUntil = performance.now() + 900;
+  }
+
+  let broadcastActive = null;
+  function broadcastPulse(){
+    const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(cssVar('--accent')), transparent:true, opacity:0.45, wireframe:true });
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 24), mat);
+    scene.add(mesh);
+    broadcastActive = { start: performance.now(), mesh, mat };
+  }
+
+  let finalPulseUntil = 0;
+  function pulseFinal(){ finalPulseUntil = performance.now() + 1400; }
+
+  function flashAlert(companionName){
+    const c = companions[companionName];
+    if(!c) return;
+    c.mat.color.set('#E05A5A'); c.mat.emissive.set('#E05A5A'); c.mat.emissiveIntensity = 1.5;
+    c.alertUntil = performance.now() + 1800;
+  }
+
+  let orbState = 'idle';
+  let amp = 0;
+  function setState(s){ orbState = s; }
+  function setAmp(v){ amp = v; }
+
+  const startTime = performance.now();
+  let t = 0;
+  const _v = new THREE.Vector3();
+
+  function projectLabel(el, worldPos, offsetY){
+    _v.copy(worldPos); _v.y += offsetY;
+    _v.project(camera);
+    const behind = _v.z > 1;
+    const x = (_v.x * 0.5 + 0.5) * window.innerWidth;
+    const y = (-_v.y * 0.5 + 0.5) * window.innerHeight;
+    el._tx = x; el._ty = y; el._behind = behind;
+  }
+
+  function declutterLabels(){
+    // Cheap pairwise separation in screen space — the actual guarantee
+    // against overlapping labels, independent of camera angle.
+    const els = Object.values(labelEls).concat([tonyLabel]);
+    for(let iter = 0; iter < 3; iter++){
+      for(let i = 0; i < els.length; i++){
+        for(let j = i+1; j < els.length; j++){
+          const a = els[i], b = els[j];
+          const dx = b._tx - a._tx, dy = b._ty - a._ty;
+          const dist = Math.hypot(dx, dy) || 0.01;
+          const minDist = 46;
+          if(dist < minDist){
+            const push = (minDist - dist) / 2;
+            const nx = dx / dist, ny = dy / dist;
+            a._tx -= nx * push; a._ty -= ny * push;
+            b._tx += nx * push; b._ty += ny * push;
+          }
+        }
+      }
+    }
+  }
+
+  function animate(){
+    requestAnimationFrame(animate);
+    t += 0.016;
+    controls.update();
+
+    let targetScale = 1 + Math.sin(t * 1.1) * 0.025;
+    let intensity = 0.35;
+    if(orbState === 'listening'){ targetScale = 1 + amp * 0.26; intensity = 0.7; }
+    else if(orbState === 'thinking'){ targetScale = 1 + Math.sin(t * 6) * 0.05; intensity = 0.9; }
+    else if(orbState === 'speaking'){ targetScale = 1 + amp * 0.2; intensity = 0.8; }
+    if(performance.now() < finalPulseUntil){
+      const p = 1 - (finalPulseUntil - performance.now()) / 1400;
+      targetScale = 1 + Math.sin(p * Math.PI) * 0.3;
+      intensity = 0.35 + Math.sin(p * Math.PI) * 1.0;
+    }
+    tonyGroup.scale.x += (targetScale - tonyGroup.scale.x) * 0.15;
+    tonyGroup.scale.y = tonyGroup.scale.z = tonyGroup.scale.x;
+    coreMat.emissiveIntensity += (intensity - coreMat.emissiveIntensity) * 0.1;
+    tonyGroup.rotation.y += 0.0018;
+
+    listenRing.material.opacity += ((orbState === 'listening' ? 0.5 : 0) - listenRing.material.opacity) * 0.1;
+    listenRing.scale.setScalar(1 + Math.sin(t * 2) * 0.06);
+
+    const now = performance.now();
+    const elapsedMs = now - startTime;
+    COMPANION_ORDER.forEach(name => {
+      const c = companions[name];
+      const y = c.baseY + Math.sin(t * 0.7 + c.phase) * 0.3;
+      c.mesh.position.y = y;
+      c.mesh.rotation.y += 0.008;
+
+      // staggered entrance
+      if(elapsedMs > c.entranceDelay){
+        const growTarget = 1;
+        c.mesh.scale.x += (growTarget - c.mesh.scale.x) * 0.08;
+        c.mesh.scale.y = c.mesh.scale.z = c.mesh.scale.x;
+        labelEls[name].style.opacity = Math.min(1, (elapsedMs - c.entranceDelay) / 400);
+      }
+
+      if(c.alertUntil && now > c.alertUntil){
+        c.mat.color.copy(c.baseColor); c.mat.emissive.copy(c.baseColor); c.alertUntil = null;
+      }
+      const targetIntensity = (c.pulseUntil && now < c.pulseUntil) ? 1.3 : (c.alertUntil ? 1.5 : 0.35);
+      c.mat.emissiveIntensity += (targetIntensity - c.mat.emissiveIntensity) * 0.12;
+
+      projectLabel(labelEls[name], c.mesh.position, 0.55);
+    });
+    projectLabel(tonyLabel, tonyGroup.position, 1.55);
+    declutterLabels();
+    Object.entries(labelEls).forEach(([name, el]) => {
+      el.style.transform = `translate3d(${el._tx}px, ${el._ty}px, 0) translate(-50%,-50%)`;
+      el.style.visibility = el._behind ? 'hidden' : 'visible';
+    });
+    tonyLabel.style.transform = `translate3d(${tonyLabel._tx}px, ${tonyLabel._ty}px, 0) translate(-50%,-50%)`;
+    tonyLabel.style.visibility = tonyLabel._behind ? 'hidden' : 'visible';
+
+    for(let i = activeBeams.length - 1; i >= 0; i--){
+      const b = activeBeams[i];
+      b.life -= 0.02;
+      b.mat.opacity = Math.max(0, b.life) * 0.85;
+      if(b.life <= 0){ scene.remove(b.line); activeBeams.splice(i, 1); }
+    }
+
+    if(broadcastActive){
+      const elapsed = (performance.now() - broadcastActive.start) / 1000;
+      broadcastActive.mesh.scale.setScalar(1 + elapsed * 5.5);
+      broadcastActive.mat.opacity = Math.max(0, 0.45 - elapsed * 0.55);
+      if(elapsed > 1){ scene.remove(broadcastActive.mesh); broadcastActive = null; }
+    }
+
+    bandGroup.rotation.y += 0.0006;
+    composer.render();
+  }
+  animate();
+
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    composer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  const observer = new MutationObserver(() => {
+    const accent = new THREE.Color(cssVar('--accent'));
+    coreMat.emissive.copy(accent);
+    rimMat.color.copy(accent);
+    tonyLight.color.copy(accent);
+    listenRing.material.color.copy(accent);
+  });
+  observer.observe(document.documentElement, { attributes:true, attributeFilter:['data-theme'] });
+
+  document.getElementById('worldHint')?.classList.add('show');
+
+  window.TonyWorld = {
+    setState, setAmp,
+    pulseCompanion: fireBeam,
+    broadcastPulse,
+    flashAlert,
+    pulseFinal,
+    setName(name){ document.getElementById('tonyLabelText').textContent = name || 'Tony'; },
+  };
+}
+
+try{
+  initWorld();
+} catch(err){
+  console.warn('3D World View unavailable, falling back to flat orb:', err.message);
+  document.body.classList.add('no-webgl');
+}
+</script>
+</body>
+</html>
